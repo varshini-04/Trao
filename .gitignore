@@ -1,0 +1,13 @@
+client/node_modules/
+client/.next/
+client/out/
+client/build/
+client/.env*.local
+client/tsconfig.tsbuildinfo
+
+server/node_modules/
+server/dist/
+server/.env
+
+.DS_Store
+.env
