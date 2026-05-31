@@ -143,6 +143,7 @@ interface AITripOutput {
   itinerary: IDay[];
   packingList: IPackingItem[];
   weatherGuide: IWeatherGuide;
+  _budgetReasoning?: string;
 }
 
 export class InvalidDestinationError extends Error {
@@ -224,59 +225,55 @@ export const generateAITrip = async (
     const groq = new Groq({ apiKey });
 
     const prompt = `
-      First, verify if the destination "${destination}" is a real, geographically valid city, region, or country.
-      If it is NOT valid (e.g. gibberish, random letters like "abc" or "jhszbj", fictional places, or non-existent entities), you MUST immediately return only this JSON object and nothing else:
+  You are an elite, highly structured travel planner agent. 
+  
+  Generate a comprehensive, personalized travel plan for a trip to "${destination}".
+  
+  Trip Parameters:
+  - Duration: ${numDays} days
+  - Budget Profile: ${budgetType} (Low: Frugal/Backpacker, Medium: Comfortable/Standard, High: Luxury/Premium)
+  - Core Interests: ${interests.join(', ')}
+
+  CRITICAL DIRECTIVE: You must calculate all costs in the official local currency of "${destination}".
+
+  The response MUST be valid JSON matching this EXACT schema:
+  {
+    "_budgetReasoning": "string (Briefly show your math. State the local currency, estimate daily hotel cost, daily food cost, flights, and multiply by ${numDays} days to prove the totalCost)",
+    "estimatedBudget": {
+      "currencyCode": "string (3-letter ISO)",
+      "currencySymbol": "string",
+      "flights": number,
+      "accommodation": number,
+      "food": number,
+      "activities": number,
+      "totalCost": number (Must exactly equal flights + accommodation + food + activities)
+    },
+    "hotels": [
+      { "name": "string", "type": "Budget Friendly | Mid Range | Luxury", "description": "string", "rating": number }
+    ],
+    "itinerary": [
       {
-        "status": "error",
-        "message": "Invalid destination. Please enter a real city, region, or country."
+        "dayNumber": number,
+        "activities": [
+          { "activityId": "string", "time": "Morning | Afternoon | Evening", "title": "string", "description": "string", "location": "string", "costEstimate": "string" }
+        ]
       }
+    ],
+    "packingList": [
+      { "itemId": "string", "name": "string", "category": "Clothing | Toiletries | Electronics | Documents | Miscellaneous", "checked": false }
+    ],
+    "weatherGuide": {
+      "summary": "string",
+      "averageTempCelsius": number,
+      "precipitationChance": number
+    }
+  }
 
-      If the destination is valid, generate a comprehensive, personalized travel plan for a trip to "${destination}".
-      Details of the trip:
-      - Duration: ${numDays} days
-      - Budget Profile: ${budgetType} (Low: backpacker, Medium: comfortable/mid-tier, High: luxury/premium)
-      - Interests: ${interests.join(', ')}
-
-      The response must be in valid JSON format matching this exact schema structure:
-      {
-        "estimatedBudget": {
-          "currencyCode": "string",
-          "currencySymbol": "string",
-          "flights": number,
-          "accommodation": number,
-          "food": number,
-          "activities": number,
-          "totalCost": number
-        },
-        "hotels": [
-          { "name": "string", "type": "Budget Friendly | Mid Range | Luxury", "description": "string", "rating": number }
-        ],
-        "itinerary": [
-          {
-            "dayNumber": number,
-            "activities": [
-              { "activityId": "string", "time": "Morning | Afternoon | Evening", "title": "string", "description": "string", "location": "string", "costEstimate": "string" }
-            ]
-          }
-        ],
-        "packingList": [
-          { "itemId": "string", "name": "string", "category": "Clothing | Toiletries | Electronics | Documents | Miscellaneous", "checked": false }
-        ],
-        "weatherGuide": {
-          "summary": "string",
-          "averageTempCelsius": number,
-          "precipitationChance": number
-        }
-      }
-
-      Strict guidelines:
-      1. Dynamic Currency Matching & Localized Costs: You MUST automatically detect the official currency of the destination "${destination}" and calculate all estimated costs (flights, accommodation, food, activities, totalCost) in that local currency (e.g. Japanese Yen [JPY, ¥] for Japan, Euros [EUR, €] for France/Italy/etc., British Pounds [GBP, £] for UK, Indian Rupees [INR, ₹] for India, Australian Dollars [AUD, A$] for Australia, Canadian Dollars [CAD, C$] for Canada, etc.). You must return the appropriate currencyCode (3-letter ISO code) and currencySymbol in the JSON payload.
-      2. Budget breakdown must realistically align with the budget type "${budgetType}", the target destination "${destination}", and be scaled correctly to the target currency's magnitude (e.g., total cost in Yen for JPY, Pounds for GBP, etc.).
-      3. Itinerary activities must be detailed, exciting, and specifically tailored to the interests: "${interests.join(', ')}".
-      4. Hotel suggestions must feature 3 distinct options matching: 1 Budget Friendly, 1 Mid Range, and 1 Luxury.
-      5. Create a smart packing list of 6-10 items tailored to the destination climate, trip duration, and interests. Include items in proper categories.
-      6. Include a weather guide with a brief summary, estimated temperature in Celsius, and rain probability.
-    `;
+  Strict Guidelines:
+  1. No Markdown formatting outside the JSON object. 
+  2. The itinerary activities MUST strictly cater to the user's Core Interests: ${interests.join(', ')}.
+  3. Ensure exactly 3 hotel options (1 Budget, 1 Mid Range, 1 Luxury).
+`;
 
     const chatCompletion = await groq.chat.completions.create({
       messages: [
