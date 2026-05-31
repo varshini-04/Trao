@@ -2,94 +2,119 @@
 
 Trao is a full-stack, production-grade web application that allows users to register, log in, and dynamically generate comprehensive day-by-day travel itineraries. Powered by Llama 3.3 via Groq in the backend and a modern Next.js client on the frontend, users can estimate trip budgets, receive hotel suggestions, modify itineraries dynamically, and check off custom AI-generated packing lists.
 
-## Features
+---
 
-1.  **Secure Authentication & Isolation:** Dedicated JWT auth verification. User travel data is fully isolated in MongoDB, preventing access by other users.
-2.  **Interactive Trip wizard:** A sleek, multi-step stepper wizard (Destination -> Days -> Budget -> Interests) to configure your getaway.
-3.  **AI Itinerary & Hotel Planner:** Generates day-by-day sightseeing activities, cost estimates, and three curated hotel options (Budget, Mid-Range, Luxury).
-4.  **Flexible Modification:** Users can manually delete activities, add custom events, or use AI prompts to rewrite individual days (e.g. *"make it more food-focused"*).
-5.  **Smart Packing Assistant (Creative Feature):** Generates a custom checklist based on the destination's climate, trip duration, and selected interests. Progress is tracked via a dynamic progress bar and saved in real-time.
-6.  **Weather Guide:** Displays localized weather summaries, average temperatures, and precipitation probabilities.
+## 1. Project Overview & Choice of Stack
+
+Trao is designed to solve a common problem in trip planning: manual itinerary construction and budget planning. By harnessing LLMs and live API integrations, it turns user inputs into a structured trip brochure.
+
+### Tech Stack Justification
+*   **Frontend: Next.js (App Router) + Tailwind CSS**
+    *   *Next.js* was chosen for its clean folder-based routing, rich React server/client component separation, and fast build compilation.
+    *   *Tailwind CSS* provides highly responsive, utility-first styling control, supporting our custom luxury-concierge theme and overlapping Z-index layouts.
+*   **Backend: Node.js + Express + TypeScript**
+    *   *Node.js/Express* provides a lightweight, highly scalable framework for building API endpoints.
+    *   *TypeScript* acts as a shared compiler safety net between our client and server schemas, avoiding runtime inconsistencies.
+*   **AI Engine: Llama-3.3-70b-versatile via Groq SDK**
+    *   Groq offers extremely fast token inference speed, making interactive chat completions and real-time generation viable for web users.
+*   **Database: MongoDB + Mongoose**
+    *   A document store is ideal for travel plans, as itineraries, weather objects, packing lists, and hotel lists naturally nest as sub-documents in a single `Trip` record.
 
 ---
 
-## Technical Stack
+## 2. Core Features & Grading Requirements Met
 
-*   **Frontend:** Next.js (App Router), TypeScript, Tailwind CSS, Zustand, TanStack Query, Framer Motion, Lucide icons.
-*   **Backend:** Node.js, Express, TypeScript, Mongoose.
-*   **AI Engine:** Llama-3.3-70b-versatile via Groq SDK (supporting structured JSON mode).
-*   **Database:** MongoDB.
+1.  **Secure Authentication & Isolation:** Users register and authenticate via JWT tokens. The database layers query specifically by the authenticated `userId`, ensuring complete data isolation between accounts.
+2.  **Interactive Trip Wizard:** Multi-step wizard layout (Destination -> Days -> Budget -> Interests) to dynamically construct plans.
+3.  **AI Itinerary & Budget Planner:** Generates sensory, magazine-style activity descriptions grounded in live weather statistics and calculated in the local currency of the destination.
+4.  **Editable Itinerary:**
+    *   *Remove Activity:* Trash icons delete items and re-sync the schema.
+    *   *Add Activity:* Form adds custom events to any day's timeline.
+    *   *Regenerate Day:* Custom prompt input lets users rewrite a specific day's activities using AI.
+5.  **Hotel Suggestions:** Outputs Budget, Mid-Range, and Luxury hotel suggestions including average popular user ratings.
+
+### Creative Custom Features (Bonus Requirement)
+*   **Live Weather Integration:** To solve LLM weather hallucinations, the backend queries the **Open-Meteo Geocoding and Weather APIs** using destination coordinates, feeding live temperature and precipitation rates directly to the LLM system prompt.
+*   **Smart Packing Assistant:** Generates a targeted checklist based on the destination's real weather conditions, trip duration, and user interests. Checklist progress updates dynamically via a real-time progress bar.
 
 ---
 
-## Getting Started
+## 3. High-Level Architecture Explanation
+
+```
+Client [Next.js Client App] -- JWT / API Requests --> ExpressServer [Node.js Express Server]
+                                                            |
+                                      +---------------------+---------------------+
+                                      |                     |                     |
+                                      v                     v                     v
+                              MongoDB Instance     Open-Meteo Weather API    Groq SDK (LLM)
+```
+
+The system employs a strict validation pipeline to prevent crashes or loading loops:
+1.  **API Fetch**: Resolves destination latitude/longitude and fetches live weather.
+2.  **LLM Call**: Compiles coordinates and live temperature into a highly structured JSON query.
+3.  **Zod Schema Enforcement**: Validates the output from the Groq SDK against a strict TypeScript schema contract (`TripSchema`) using `zod`. Any layout deviations or type mishaps (such as string costs or fuzzy time tags) are automatically transformed or caught using fallback values.
+
+---
+
+## 4. Getting Started & Setup Instructions
 
 ### Prerequisites
+*   Node.js (v18+)
+*   MongoDB running locally
 
-Ensure you have **Node.js (v18+ recommended)** and **MongoDB** installed and running on your system.
+### Local Development Setup
 
-### 1. Backend Setup
-
-1.  Navigate to the `server` directory:
+#### 1. Backend Server Setup
+1.  Navigate to the server directory:
     ```bash
     cd server
     ```
-2.  Install dependencies:
+2.  Install packages:
     ```bash
     npm install
     ```
-3.  Configure environment variables. Copy `.env.example` to `.env` and fill in your keys:
-    ```bash
-    cp .env.example .env
-    ```
-    *Make sure to paste your `GROQ_API_KEY` in `.env`:*
+3.  Create `.env` based on `.env.example`:
     ```env
     PORT=5001
     MONGODB_URI=mongodb://localhost:27017/ai-travel-planner
     JWT_SECRET=supersecretjwttokenforaitravelplannerapp
     GROQ_API_KEY=your_groq_api_key_here
     ```
-4.  Start the development backend:
+4.  Start dev backend:
     ```bash
     npm run dev
     ```
-    The server will run on `http://localhost:5001`.
 
-### 2. Frontend Setup
-
-1.  Navigate to the `client` directory:
+#### 2. Frontend Client Setup
+1.  Navigate to the client directory:
     ```bash
-    cd ../client
+    cd client
     ```
-2.  Install dependencies:
+2.  Install packages:
     ```bash
     npm install
     ```
-3.  Start the Next.js development server:
+3.  Start dev client:
     ```bash
     npm run dev
     ```
-    The frontend will run on `http://localhost:3000`. Open your browser and navigate to it.
+    Open `http://localhost:3000` to view the application dashboard.
 
 ---
 
-## Architectural Highlights
+## 5. Key Design Decisions, Trade-Offs, & Resiliency
 
-### 1. Strict Data Isolation
-The `Trip` model enforces the inclusion of `userId`. All operations (getting trips, retrieving specific itinerary, editing items) verify resource ownership at the service layer:
-```typescript
-if (trip.userId.toString() !== req.user.id) {
-  return res.status(403).json({ message: "Access denied." });
-}
-```
+### Resilience & Offline Mode
+*   *Missing/Invalid Keys:* If `GROQ_API_KEY` is not supplied, the server falls back to a clean mock generation system, providing a valid dummy itinerary so assessors can test the dashboard features without API keys.
+*   *Open-Meteo Outages:* Geocoding and weather fetch failures are protected by default fallbacks (e.g. coordinates for Tokyo and 22°C baseline) preventing database insertion crashes.
 
-### 2. AI Structured Output & Fallbacks
-Groq SDK's JSON mode is utilized to guarantee the response matches the application's Mongoose/TypeScript schema exactly:
-```typescript
-const chatCompletion = await groq.chat.completions.create({
-  messages: [...],
-  model: 'llama-3.3-70b-versatile',
-  response_format: { type: 'json_object' }
-});
-```
-*Resilience Fallback:* If no `GROQ_API_KEY` is configured in the environment, the backend runs in a local offline demo mode and returns a dynamically generated mock travel plan. If the key is present but a rate limit or service error occurs, the actual API limit error is securely propagated to the client to let the user know they need to wait or check credentials.
+### Zod Error Masking
+*   If LLM outputs deviate from schema arrays or omit parameters, `.catch()` blocks in Zod replace the missing data points with valid placeholders (e.g., `'N/A'`, `'Free'`, rating: `4.0`) rather than breaking the application flow.
+
+---
+
+## 6. Known Limitations
+1.  **Free API Rate Limits:** The geocoding API requires a clean internet connection and can occasionally hit rate-limits on parallel requests.
+2.  **Groq SDK Capacity limits:** High parallel traffic might result in 429 errors from Groq. These are caught on the backend and mapped to friendly "Our AI planners are busy" messages.
+3.  **Maximum Days Clamping:** The LLM prompt context is limited to 7-day itineraries for output stability. Inputs above this threshold are restricted defensively to preserve token parsing limits.

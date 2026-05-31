@@ -283,8 +283,8 @@ export default function TripDetails() {
           {/* Cover Illustration Card */}
           <div className="border border-slate-100 p-3 bg-white rounded-3xl shadow-md mb-8 overflow-hidden hover:scale-[1.02] transition-transform duration-300">
             <img 
-              src={DEST_IMAGES[activeTrip._id.charCodeAt(0) % DEST_IMAGES.length] || DEST_IMAGES[0]} 
-              alt="Beautiful Vacation Destination Header" 
+              src="https://images.unsplash.com/photo-1436491865332-7a61a109cc05?q=80&w=2074&auto=format&fit=crop" 
+              alt="Travel Destination" 
               className="w-full h-48 object-cover rounded-2xl" 
             />
           </div>

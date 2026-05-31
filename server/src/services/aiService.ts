@@ -1,5 +1,65 @@
 import Groq from 'groq-sdk';
+import { z } from 'zod';
 import { IBudgetBreakdown, IHotel, IDay, IPackingItem, IWeatherGuide } from '../models/Trip';
+
+// Strict validation schemas using Zod as the data contract with bulletproof fallbacks
+export const ActivitySchema = z.object({
+  activityId: z.string(),
+  time: z.string().transform(val => {
+    const lower = val.toLowerCase();
+    if (lower.includes('morn')) return 'Morning';
+    if (lower.includes('afternoon') || lower.includes('noon') || lower.includes('day')) return 'Afternoon';
+    return 'Evening';
+  }),
+  title: z.string(),
+  description: z.string(),
+  location: z.string().default('N/A').catch('N/A'),
+  costEstimate: z.string().default('Free').catch('Free')
+});
+
+export const DaySchema = z.object({
+  dayNumber: z.number(),
+  activities: z.array(ActivitySchema)
+});
+
+export const BudgetSchema = z.object({
+  flights: z.number(),
+  accommodation: z.number(),
+  food: z.number(),
+  activities: z.number(),
+  totalCost: z.number(),
+  currencyCode: z.string().optional(),
+  currencySymbol: z.string().optional()
+});
+
+export const HotelSchema = z.object({
+  name: z.string(),
+  type: z.string().default('Mid Range').catch('Mid Range'),
+  description: z.string(),
+  rating: z.number().optional().default(4.0).catch(4.0)
+});
+
+export const PackingItemSchema = z.object({
+  itemId: z.string(),
+  name: z.string(),
+  category: z.string().default('Miscellaneous').catch('Miscellaneous'),
+  checked: z.boolean().default(false).catch(false)
+});
+
+export const WeatherGuideSchema = z.object({
+  summary: z.string(),
+  averageTempCelsius: z.number().catch(22),
+  precipitationChance: z.number().catch(15)
+});
+
+export const TripSchema = z.object({
+  _budgetReasoning: z.string().optional(),
+  estimatedBudget: BudgetSchema,
+  hotels: z.array(HotelSchema),
+  itinerary: z.array(DaySchema),
+  packingList: z.array(PackingItemSchema),
+  weatherGuide: WeatherGuideSchema.optional()
+});
 
 const getApiKey = () => process.env.GROQ_API_KEY || '';
 const MODEL_NAME = 'llama-3.3-70b-versatile'; // Standard smart model on Groq
@@ -212,6 +272,11 @@ export const generateAITrip = async (
   budgetType: 'Low' | 'Medium' | 'High',
   interests: string[]
 ): Promise<AITripOutput> => {
+  // Edge Case 3: Reject Extremes in Trip Parameters (1 to 7 Days maximum for security & stability)
+  if (numDays < 1 || numDays > 7) {
+    throw new Error("App supports 1-7 day itineraries for optimal performance");
+  }
+
   const apiKey = getApiKey();
   if (!apiKey) {
     console.warn('GROQ_API_KEY is not defined. Using mock trip data.');
@@ -221,12 +286,53 @@ export const generateAITrip = async (
     return generateMockTrip(destination, numDays, budgetType, interests);
   }
 
+  // 1. Fetch Real Weather Data (The Tool Step)
+  let lat = 35.6762;  // Tokyo default lat
+  let lon = 139.6503; // Tokyo default lon
+  let isWeatherLive = false;
+
+  try {
+    const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(destination)}&count=1&language=en&format=json`;
+    const geoRes = await fetch(geoUrl);
+    if (geoRes.ok) {
+      const geoData = (await geoRes.json()) as any;
+      if (geoData.results && geoData.results.length > 0) {
+        lat = geoData.results[0].latitude;
+        lon = geoData.results[0].longitude;
+      }
+    }
+  } catch (err) {
+    console.warn(`Geocoding failed for destination: ${destination}. Falling back to default coordinates.`, err);
+  }
+
+  let realTemp = 22; // default fallback temperature
+  try {
+    const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true`;
+    const weatherRes = await fetch(weatherUrl);
+    if (weatherRes.ok) {
+      const weatherData = (await weatherRes.json()) as any;
+      if (weatherData.current_weather && typeof weatherData.current_weather.temperature === 'number') {
+        realTemp = weatherData.current_weather.temperature;
+        isWeatherLive = true;
+      }
+    }
+  } catch (err) {
+    console.warn(`Weather fetch failed for lat: ${lat}, lon: ${lon}. Falling back to default temperature: ${realTemp}`, err);
+  }
+
+  // Edge Case 4: Clear fallback message passed to the prompt if live weather is unreachable
+  const weatherContext = isWeatherLive
+    ? `ENVIRONMENT CONTEXT: The actual, live real-time weather at the destination right now is exactly ${realTemp}°C. You MUST set the \`averageTempCelsius\` in the JSON response to exactly ${realTemp}. Furthermore, you must customize the \`packingList\` and activity descriptions to perfectly suit a current temperature of ${realTemp}°C.`
+    : `ENVIRONMENT CONTEXT: Live real-time weather is currently unreachable, using a baseline seasonal average temperature of exactly ${realTemp}°C. You MUST set the \`averageTempCelsius\` in the JSON response to exactly ${realTemp}. Furthermore, you must customize the \`packingList\` and activity descriptions to perfectly suit a temperature of ${realTemp}°C.`;
+
   try {
     const groq = new Groq({ apiKey });
 
     const prompt = `
   You are an elite, highly structured travel planner agent. 
   
+  ${weatherContext}
+
   Generate a comprehensive, personalized travel plan for a trip to "${destination}".
   
   Trip Parameters:
@@ -273,6 +379,13 @@ export const generateAITrip = async (
   1. No Markdown formatting outside the JSON object. 
   2. The itinerary activities MUST strictly cater to the user's Core Interests: ${interests.join(', ')}.
   3. Ensure exactly 3 hotel options (1 Budget, 1 Mid Range, 1 Luxury).
+  4. IMMERSIVE STORYTELLING FOR ACTIVITY DESCRIPTIONS:
+     - Write all activity descriptions in the style of a luxury travel concierge or a high-end travel magazine.
+     - Descriptions MUST NOT be generic (e.g., avoid "Walk around the park").
+     - Descriptions must be immersive, sensory, and highly specific (e.g., "Stroll through the shaded avenues of Ueno Park, stopping to sample matcha from a local vendor before entering the National Museum").
+     - Each activity description MUST be exactly 2-3 sentences long and include a practical travel tip (e.g., "Best to arrive 15 minutes early to secure a window seat").
+  5. COST ESTIMATION DIRECTIVE (Edge Case 1):
+     - For free activities, set the \`costEstimate\` field to a clear string like 'Free' or '0 [Currency Label]'. Ensure your backend schemas tolerate this gracefully.
 `;
 
     const chatCompletion = await groq.chat.completions.create({
@@ -301,17 +414,34 @@ export const generateAITrip = async (
       throw new InvalidDestinationError(parsedData.message || 'Invalid destination. Please enter a real city, region, or country.');
     }
 
-    return parsedData as AITripOutput;
+    try {
+      const validatedTrip = TripSchema.parse(parsedData);
+      return validatedTrip as AITripOutput;
+    } catch (zodError) {
+      if (zodError instanceof z.ZodError) {
+        console.error('Zod Validation Failure for Trip Itinerary Generation:', JSON.stringify(zodError.errors, null, 2));
+        throw new Error(`AI generated response failed schema validation: ${zodError.message}`);
+      }
+      throw zodError;
+    }
   } catch (error: any) {
     if (error instanceof InvalidDestinationError) {
       throw error;
     }
     console.error('Error generating AI itinerary via Groq:', error);
     const errMsg = error?.message || String(error);
-    if (errMsg.includes('429') || errMsg.toLowerCase().includes('quota') || errMsg.toLowerCase().includes('rate limit') || errMsg.toLowerCase().includes('exhausted')) {
-      throw new Error('Groq AI API rate limit or capacity exceeded. Please try again in a few minutes.');
+    
+    // Edge Case 5: Map API rate limits or general server issues to a clean, user-friendly message
+    if (
+      errMsg.includes('429') || 
+      errMsg.toLowerCase().includes('quota') || 
+      errMsg.toLowerCase().includes('rate limit') || 
+      errMsg.toLowerCase().includes('exhausted')
+    ) {
+      throw new Error('Our AI planners are currently busy. Please wait a moment and try again!');
     }
-    throw new Error(`AI Travel Planner Service Error: ${errMsg}`);
+    
+    throw new Error('Our AI planners are currently busy. Please wait a moment and try again!');
   }
 };
 
@@ -377,6 +507,13 @@ export const regenerateAIDay = async (
           { "activityId": "string", "time": "Morning | Afternoon | Evening", "title": "string", "description": "string", "location": "string", "costEstimate": "string" }
         ]
       }
+
+      Strict Guidelines:
+      1. IMMERSIVE STORYTELLING FOR ACTIVITY DESCRIPTIONS:
+         - Write all activity descriptions in the style of a luxury travel concierge or a high-end travel magazine.
+         - Descriptions MUST NOT be generic.
+         - Descriptions must be immersive, sensory, and highly specific (e.g., "Stroll through the shaded avenues of Ueno Park, stopping to sample matcha from a local vendor before entering the National Museum").
+         - Each activity description MUST be exactly 2-3 sentences long and include a practical travel tip (e.g., "Best to arrive 15 minutes early to secure a window seat").
     `;
 
     const chatCompletion = await groq.chat.completions.create({
@@ -400,8 +537,17 @@ export const regenerateAIDay = async (
       throw new Error('Groq returned empty response for day regeneration');
     }
 
-    const parsedData = JSON.parse(responseText.trim()) as IDay;
-    return parsedData;
+    const parsedData = JSON.parse(responseText.trim());
+    try {
+      const validatedDay = DaySchema.parse(parsedData);
+      return validatedDay;
+    } catch (zodError) {
+      if (zodError instanceof z.ZodError) {
+        console.error('Zod Validation Failure for Day Regeneration:', JSON.stringify(zodError.errors, null, 2));
+        throw new Error(`AI generated day failed schema validation: ${zodError.message}`);
+      }
+      throw zodError;
+    }
   } catch (error: any) {
     console.error('Error regenerating AI day via Groq:', error);
     const errMsg = error?.message || String(error);
