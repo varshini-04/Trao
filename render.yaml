@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: trao-backend
+    env: node
+    plan: free
+    rootDir: server
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: MONGODB_URI
+        sync: false
+        placeholder: "Paste MongoDB Atlas connection string here"
+      - key: JWT_SECRET
+        generateValue: true
+      - key: GROQ_API_KEY
+        sync: false
+        placeholder: "Paste Groq API Key here"
